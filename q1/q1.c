@@ -5,6 +5,16 @@
 #include <time.h>
 #include <string.h>
 
+//Regular bold text
+#define BBLK "\e[1;30m"
+#define BRED "\e[1;31m"
+#define BGRN "\e[1;32m"
+#define BYEL "\e[1;33m"
+#define BBLU "\e[1;34m"
+#define BMAG "\e[1;35m"
+#define BCYN "\e[1;36m"
+#define ANSI_RESET "\x1b[0m"
+
 // some constants
 #define MAX_MENTORS 100
 #define MAX_LABS 100
@@ -12,7 +22,7 @@
 #define MAX_COURSES 100
 #define MAX_STRING 100
 #define NUM_PREFS 3
-#define PROB 0.25
+#define PROB 0.5
 
 // struct for student
 struct Student
@@ -94,20 +104,23 @@ void *handle_student(void *args)
 
     // sleep for t seconds
     sleep(students[stu_id].arrival_time);
-    printf("Student %d has filled in preferences for course registration\n", stu_id);
+    printf(BCYN "Student %d has filled in preferences for course registration\n" ANSI_RESET, stu_id);
 
-    for (students[stu_id].curr_pref = 0; students[stu_id].curr_pref < NUM_PREFS; students[stu_id].curr_pref++)
-    { // loop for the preferences
-        int cur_pref = students[stu_id].curr_pref;
+    int cur_pref = students[stu_id].curr_pref;
+    while (cur_pref < NUM_PREFS)
+    {
+        // loop for the preferences
         int c_id = students[stu_id].preferences[cur_pref];
         int c_id_next, change_flag = 0;
         if (cur_pref < 2)
             c_id_next = students[stu_id].preferences[cur_pref + 1];
 
+        // printf("Student %d course %s pref %d\n", stu_id, courses[c_id].name, cur_pref + 1);
+
         while (1)
         {
             pthread_mutex_lock(&courses_mutex[c_id]);
-            while (courses[c_id].is_available && (course_ready_arr[c_id] == 0))
+            while (courses[c_id].is_available && !course_ready_arr[c_id])
             {
                 // conditional wait for ta allotment
                 pthread_cond_wait(&courses[c_id].is_ready, &courses_mutex[c_id]);
@@ -126,7 +139,7 @@ void *handle_student(void *args)
             {
                 change_flag = 0;
                 courses[c_id].avl_slots--;
-                printf("Student %d has been allocated a seat in course %s\n",
+                printf(BYEL "Student %d has been allocated a seat in course %s\n" ANSI_RESET,
                        stu_id, courses[c_id].name);
                 pthread_mutex_unlock(&courses_mutex[c_id]);
                 break;
@@ -136,14 +149,16 @@ void *handle_student(void *args)
 
         if (change_flag == 1)
         {
+        change_is_inevitable:
             if (cur_pref == 2)
             {
-                printf("Student %d couldn’t get any of his preferred courses\n", stu_id);
+                printf(BRED "Student %d couldn’t get any of his preferred courses\n" ANSI_RESET, stu_id);
                 students[stu_id].id = -1;
                 return NULL;
             }
-            printf("Student %d has changed current preference from %s (priority %d) to %s (priority %d)\n",
+            printf(BBLU "Student %d has changed current preference from %s (priority %d) to %s (priority %d)\n" ANSI_RESET,
                    stu_id, courses[c_id].name, cur_pref + 1, courses[c_id_next].name, cur_pref + 2);
+            cur_pref++;
             continue;
         }
 
@@ -160,18 +175,22 @@ void *handle_student(void *args)
         if (prob > PROB)
         {
             // select the course
-            printf("Student %d has selected course %s permanently\n", stu_id, courses[c_id].name);
+            printf(BGRN "Student %d has selected course %s permanently\n" ANSI_RESET,
+                   stu_id, courses[c_id].name);
             return NULL;
         }
         else
         {
             students[stu_id].curr_pref++;
-            printf("Student %d has withdrawn from course %s\n", stu_id, courses[c_id].name);
+            printf(BRED "Student %d has withdrawn from course %s\n" ANSI_RESET,
+                   stu_id, courses[c_id].name);
+            goto change_is_inevitable;
         }
+        cur_pref++;
     }
 
     // if no subj liked, exit the simulation, id=-1
-    printf("Student %d couldn’t get any of his preferred courses\n", stu_id);
+    printf(BMAG "Student %d couldn’t get any of his preferred courses\n" ANSI_RESET, stu_id);
     students[stu_id].id = -1;
 
     return NULL;
@@ -228,7 +247,7 @@ void *handle_course(void *args)
                 all_labs[lab_idx].ta_occupied_array[ta_i] = 1;
                 courses[c_id].curr_ta = ta_i;
                 courses[c_id].curr_lab = lab_idx;
-                printf("TA %d from lab %s has been allocated to course %s for %d TA ship\n",
+                printf(BCYN "TA %d from lab %s has been allocated to course %s for %d TA ship\n" ANSI_RESET,
                        ta_i, all_labs[lab_idx].name, courses[c_id].name,
                        all_labs[lab_idx].ta_limit - all_labs[lab_idx].ta_limit_array[ta_i]);
 
@@ -247,7 +266,8 @@ void *handle_course(void *args)
                 pthread_mutex_lock(&labs_mutex[lab_idx]);
                 // remove the lab, is_available = 0
                 all_labs[lab_idx].id = -1;
-                printf("Lab %s no longer has students available for TA ship\n", all_labs[lab_idx].name);
+                printf(BMAG "Lab %s no longer has students available for TA ship\n" ANSI_RESET,
+                       all_labs[lab_idx].name);
 
                 // unlock lab
                 pthread_mutex_unlock(&labs_mutex[lab_idx]);
@@ -264,27 +284,29 @@ void *handle_course(void *args)
         pthread_mutex_unlock(&courses_mutex[c_id]);
 
         // choose a limit for selected students
-        int stu_lim = rand() % courses[c_id].max_slots + 1;
         pthread_mutex_lock(&courses_mutex[c_id]);
+        int stu_lim = rand() % courses[c_id].max_slots + 1;
         courses[c_id].avl_slots = stu_lim;
-        printf("Course %s has been allocated %d seats\n", courses[c_id].name, stu_lim);
+        printf(BYEL "Course %s has been allocated %d seats\n" ANSI_RESET, courses[c_id].name, stu_lim);
         pthread_mutex_unlock(&courses_mutex[c_id]);
 
-        // wait till students come, under the limit
-        // while (stu_lim == courses[c_id].avl_slots)
-        sleep(1);
-        printf("Tutorial has started for Course %s with %d seats filled out of %d \n",
+        // wait till students come
+        sleep(3);
+        printf(BBLU "Tutorial has started for Course %s with %d seats filled out of %d \n" ANSI_RESET,
                courses[c_id].name, stu_lim - courses[c_id].avl_slots, stu_lim);
 
         pthread_mutex_lock(&courses_mutex[c_id]);
-        // conditional wait
         // run the tute, a small delay for that
-        sleep(1);
+        course_ready_arr[c_id] = 0;
+        sleep(3);
+        relinquish_TA(c_id);
         tut_over_arr[c_id] = 1;
         pthread_cond_broadcast(&courses[c_id].tut_over);
+        pthread_mutex_unlock(&courses_mutex[c_id]);
 
-        // relinquish the TA
-        relinquish_TA(c_id);
+        sleep(1);
+        pthread_mutex_lock(&courses_mutex[c_id]);
+        tut_over_arr[c_id] = 0;
         pthread_mutex_unlock(&courses_mutex[c_id]);
     }
 
@@ -301,7 +323,7 @@ void remove_course(int c_id)
     // remove the course
     courses[c_id].id = -1;
     courses[c_id].is_available = 0;
-    printf("Course %s doesn’t have any TA’s eligible and is removed from course offering\n",
+    printf(BRED "Course %s doesn’t have any TA’s eligible and is removed from course offering\n" ANSI_RESET,
            courses[c_id].name);
 
     //  signal the student about course
@@ -315,15 +337,10 @@ void relinquish_TA(int c_id)
     int clab = courses[c_id].curr_lab;
 
     pthread_mutex_lock(&labs_mutex[clab]);
-    printf("TA %d from lab %s has completed the tutorial and left the course %s\n",
+    printf(BCYN "TA %d from lab %s has completed the tutorial and left the course %s\n" ANSI_RESET,
            courses[c_id].curr_ta, all_labs[clab].name, courses[c_id].name);
     all_labs[clab].ta_occupied_array[courses[c_id].curr_ta] = 0;
     pthread_mutex_unlock(&labs_mutex[clab]);
-
-    tut_over_arr[c_id] = 0;
-    course_ready_arr[c_id] = 0;
-    // courses[c_id].curr_ta = -1;
-    // courses[c_id].curr_lab = -1;
 }
 
 int main()
