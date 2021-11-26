@@ -1,25 +1,21 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <fcntl.h>
 #include <pthread.h>
 #include <iostream>
 #include <semaphore.h>
-#include <assert.h>
 #include <queue>
-#include <vector>
 #include <tuple>
 
 using namespace std;
 typedef long long LL;
-const LL MOD = 1000000007;
+
 //Regular bold text
 #define BBLK "\e[1;30m"
 #define BRED "\e[1;31m"
@@ -34,7 +30,15 @@ const LL MOD = 1000000007;
 #define debug(x) cout << #x << " : " << x << endl
 
 #define SERVER_PORT 8001
-const LL buff_sz = 1048576;
+const LL BUFFER_SIZE = 1048576;
+pthread_mutex_t cout_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+struct send_obj
+{
+    int id;
+    int slp_time;
+    string msg;
+};
 
 pair<string, int> read_string_from_socket(int fd, int bytes)
 {
@@ -66,7 +70,6 @@ int send_string_on_socket(int fd, const string &s)
     if (bytes_sent < 0)
     {
         cerr << "Failed to SEND DATA on socket.\n";
-        // return "
         exit(-1);
     }
 
@@ -87,9 +90,8 @@ int get_socket_fd(struct sockaddr_in *ptr)
         perror("Error in socket creation for CLIENT");
         exit(-1);
     }
-    /////////////////////////////////////////////////////////////////////////////////////
-    int port_num = SERVER_PORT;
 
+    int port_num = SERVER_PORT;
     memset(&server_obj, 0, sizeof(server_obj)); // Zero out structure
     server_obj.sin_family = AF_INET;
     server_obj.sin_port = htons(port_num); //convert to big-endian order
@@ -99,46 +101,60 @@ int get_socket_fd(struct sockaddr_in *ptr)
     //https://stackoverflow.com/a/20778887/6427607
 
     /* connect to server */
-
     if (connect(socket_fd, (struct sockaddr *)&server_obj, sizeof(server_obj)) < 0)
     {
         perror("Problem in connecting to the server");
         exit(-1);
     }
-
-    //part;
-    // printf(BGRN "Connected to server\n" ANSI_RESET);
-    // part;
     return socket_fd;
 }
-////////////////////////////////////////////////////////
 
-void begin_process()
+void *begin_process(void *args)
 {
+    struct send_obj *to_send = (struct send_obj *)args;
+    string output_msg;
     struct sockaddr_in server_obj;
+
+    // sleeping for required time
+    sleep(to_send->slp_time);
+
     int socket_fd = get_socket_fd(&server_obj);
+    // pthread_mutex_lock(&cout_mutex);
+    // cout << "Connection to server successful " << to_send->id << endl;
+    // // fflush(stdout);
+    // pthread_mutex_unlock(&cout_mutex);
 
-    cout << "Connection to server successful" << endl;
-
-    while (true)
-    {
-        string to_send;
-        cout << "Enter msg: ";
-        getline(cin, to_send);
-        send_string_on_socket(socket_fd, to_send);
-        int num_bytes_read;
-        string output_msg;
-        tie(output_msg, num_bytes_read) = read_string_from_socket(socket_fd, buff_sz);
-        cout << "Received: " << output_msg << endl;
-        cout << "====" << endl;
-    }
-    // part;
+    send_string_on_socket(socket_fd, to_send->msg);
+    int num_bytes_read;
+    tie(output_msg, num_bytes_read) = read_string_from_socket(socket_fd, BUFFER_SIZE);
+    pthread_mutex_lock(&cout_mutex);
+    // string output_msg_final = to_string(to_send->id) + ":" + output_msg + "\n";
+    // cout << output_msg_final;
+    // fflush(stdout);
+    cout << to_send->id << ":" << output_msg << endl;
+    pthread_mutex_unlock(&cout_mutex);
+    return NULL;
 }
 
 int main(int argc, char *argv[])
 {
+    int num_clients;
+    cin >> num_clients;
+    struct send_obj to_send[num_clients];
+    pthread_t t_clients[num_clients];
 
-    int i, j, k, t, n;
-    begin_process();
+    for (int i = 0; i < num_clients; i++)
+    {
+        to_send[i].id = i;
+        cin >> to_send[i].slp_time;
+        getline(cin, to_send[i].msg);
+    }
+
+    for (int i = 0; i < num_clients; i++)
+        pthread_create(&t_clients[i], NULL, begin_process, (void *)(&to_send[i]));
+
+    for (int i = 0; i < num_clients; i++)
+        pthread_join(t_clients[i], NULL);
+
     return 0;
 }
