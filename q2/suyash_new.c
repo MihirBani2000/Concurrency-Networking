@@ -1,5 +1,4 @@
 
-
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,7 +7,6 @@
 #include <semaphore.h>
 #include <error.h>
 #include <errno.h>
-#include <time.h>
 
 #define COLOR_BLACK "\033[0;30m"
 #define COLOR_RED "\033[0;31m"
@@ -27,19 +25,20 @@
 
 int zone_h_capacity, zone_a_capacity, zone_n_capacity;
 int spectating_time_x;
-int num_groups, num_goal_chances, spectator_count;
-int home_goals, away_goals;
+int num_grps_g, num_goal_chances, num_persons_g;
+int h_goals_cnt_g, a_goals_cnt_g;
 
 int num_people_in_groups[1000];
+int remaining_people_in_groups[1000];
+pthread_mutex_t remaining_people_grps_lock[1000];
 int zone_h_remaining, zone_a_remaining, zone_n_remaining;
 
 pthread_t person_th[1000];
 pthread_t goal_th[1000];
 pthread_mutex_t home_lock, away_lock, zone_h_mutex, zone_a_mutex, zone_n_mutex;
 pthread_cond_t home_cond, away_cond;
-pthread_cond_t neutral_fan_cond, home_fan_cond, away_fan_cond;
-pthread_mutex_t home_cond_dummy_lock, away_cond_dummy_lock, neutral_cond_dummy_lock;
 sem_t home_semaphore, away_semaphore, neutral_semaphore;
+sem_t home_cond_semaphore, away_cond_semaphore, neutral_cond_semaphore;
 
 struct Person
 {
@@ -180,23 +179,40 @@ void *person_thread_function(void *arg)
                 continue;
             }
         }
-        pthread_cond_t *waiting_cond;
-        pthread_mutex_t *dummy_mutex;
+        // pthread_cond_t *waiting_cond;
+        // pthread_mutex_t *dummy_mutex;
+        sem_t *waiting_cond_semaphore;
         if (person->away_home_neutral == -1)
-            waiting_cond = &away_fan_cond, dummy_mutex = &away_cond_dummy_lock;
+            waiting_cond_semaphore = &away_cond_semaphore;
         else if (person->away_home_neutral == 0)
-            waiting_cond = &neutral_fan_cond, dummy_mutex = &neutral_cond_dummy_lock;
+            waiting_cond_semaphore = &neutral_cond_semaphore;
         else if (person->away_home_neutral == 1)
-            waiting_cond = &home_fan_cond, dummy_mutex = &home_cond_dummy_lock;
+            waiting_cond_semaphore = &home_cond_semaphore;
 
-        pthread_mutex_lock(dummy_mutex);
-        int ret = pthread_cond_timedwait(waiting_cond, dummy_mutex, &ts);
-        pthread_mutex_unlock(dummy_mutex);
-        if (ret != 0)
+        // pthread_mutex_lock(dummy_mutex);
+        // int ret = pthread_cond_timedwait(waiting_cond, dummy_mutex, &ts);
+        // pthread_mutex_unlock(dummy_mutex);
+        int ret;
+        while ((ret = sem_timedwait(waiting_cond_semaphore, &ts)) == -1 && errno == EINTR)
+            continue; /* Restart if interrupted by handler */
+        /* Check what happened */
+        if (ret == -1)
         {
-            printf(COLOR_MAGENTA "%s couldn't get a seat\n" COLOR_RESET, person->name);
-            printf(COLOR_YELLOW "%s is leaving for dinner\n" COLOR_RESET, person->name);
-            return NULL;
+            if (errno == ETIMEDOUT)
+            {
+                printf(COLOR_MAGENTA "%s couldn't get a seat\n" COLOR_RESET, person->name);
+                printf(COLOR_CYAN TEXT_UNDERLINE "%s is waiting for their friends at the exit\n" COLOR_RESET, person->name);
+                pthread_mutex_lock(&remaining_people_grps_lock[person->group_id]);
+                remaining_people_in_groups[person->group_id]--;
+                if (remaining_people_in_groups[person->group_id] == 0)
+                    printf(COLOR_YELLOW "Group %d is leaving for dinner\n" COLOR_RESET, person->group_id);
+                pthread_mutex_unlock(&remaining_people_grps_lock[person->group_id]);
+                return NULL;
+            }
+            else
+            {
+                perror("sem_timedwait Error");
+            }
         }
     }
     // ========================================
@@ -204,24 +220,32 @@ void *person_thread_function(void *arg)
     if (person->away_home_neutral == 0)
     {
         sleep(spectating_time_x);
-        printf(COLOR_CYAN "%s watched the match for %d seconds and is leaving\n" COLOR_RESET, person->name, spectating_time_x);
+        printf(COLOR_CYAN "%s watched the match for %d seconds and is leaving\n" COLOR_RESET,
+               person->name, spectating_time_x);
         sem_post(selected_semaphore);
         if (selected_zone == -1)
         {
-            pthread_cond_broadcast(&away_fan_cond);
-            pthread_cond_broadcast(&neutral_fan_cond);
+            sem_post(&away_cond_semaphore);
+            sem_post(&neutral_cond_semaphore);
         }
         else if (selected_zone == 0)
         {
-            pthread_cond_broadcast(&neutral_fan_cond);
-            pthread_cond_broadcast(&home_fan_cond);
+            sem_post(&neutral_cond_semaphore);
+            sem_post(&home_cond_semaphore);
         }
         else
         {
-            pthread_cond_broadcast(&neutral_fan_cond);
-            pthread_cond_broadcast(&home_fan_cond);
+            sem_post(&neutral_cond_semaphore);
+            sem_post(&home_cond_semaphore);
         }
-        printf(COLOR_YELLOW "%s is leaving for dinner\n" COLOR_RESET, person->name);
+        printf(COLOR_CYAN TEXT_UNDERLINE "%s is waiting for their friends at the exit\n" COLOR_RESET,
+               person->name);
+        pthread_mutex_lock(&remaining_people_grps_lock[person->group_id]);
+        remaining_people_in_groups[person->group_id]--;
+        if (remaining_people_in_groups[person->group_id] == 0)
+            printf(COLOR_YELLOW "Group %d is leaving for dinner\n" COLOR_RESET, person->group_id);
+        pthread_mutex_unlock(&remaining_people_grps_lock[person->group_id]);
+        // printf(COLOR_YELLOW"%s is leaving for dinner\n"COLOR_RESET, person->name);
         return NULL;
     }
 
@@ -231,13 +255,14 @@ void *person_thread_function(void *arg)
 
     clock_t og_time = clock();
     clock_t start_time = og_time;
+    //
     pthread_mutex_t *opponent_lock;
     pthread_cond_t *opponent_cond;
     int *opponent_goals;
     if (person->away_home_neutral == -1)
-        opponent_cond = &home_cond, opponent_lock = &home_lock, opponent_goals = &home_goals;
+        opponent_cond = &home_cond, opponent_lock = &home_lock, opponent_goals = &h_goals_cnt_g;
     else
-        opponent_cond = &away_cond, opponent_lock = &away_lock, opponent_goals = &away_goals;
+        opponent_cond = &away_cond, opponent_lock = &away_lock, opponent_goals = &a_goals_cnt_g;
 
     if (clock_gettime(CLOCK_REALTIME, &ts) == -1)
     {
@@ -257,32 +282,40 @@ void *person_thread_function(void *arg)
         /* Check what happened */
         if (ret_val != 0)
         {
-            printf(TEXT_UNDERLINE COLOR_GREEN_BOLD "%s watched the match for %d seconds and is now leaving\n" COLOR_RESET, person->name, spectating_time_x);
+            printf(TEXT_UNDERLINE COLOR_GREEN_BOLD "%s watched the match for %d seconds and is now leaving\n" COLOR_RESET,
+                   person->name, spectating_time_x);
             person->finished_watching = true;
         }
     }
     if (!person->finished_watching && (*opponent_goals) >= person->enrage_goal_count)
-        printf(COLOR_GREEN_BOLD TEXT_UNDERLINE "%s is leaving due to bad performance of his team\n" COLOR_RESET, person->name);
+        printf(COLOR_GREEN_BOLD TEXT_UNDERLINE "%s is leaving due to bad performance of his team\n" COLOR_RESET,
+               person->name);
     pthread_mutex_unlock(opponent_lock);
 
     sem_post(selected_semaphore);
     if (selected_zone == -1)
     {
-        pthread_cond_broadcast(&away_fan_cond);
-        pthread_cond_broadcast(&neutral_fan_cond);
+        sem_post(&away_cond_semaphore);
+        sem_post(&neutral_cond_semaphore);
     }
     else if (selected_zone == 0)
     {
-        pthread_cond_broadcast(&neutral_fan_cond);
-        pthread_cond_broadcast(&home_fan_cond);
+        sem_post(&neutral_cond_semaphore);
+        sem_post(&home_cond_semaphore);
     }
     else
     {
-        pthread_cond_broadcast(&neutral_fan_cond);
-        pthread_cond_broadcast(&home_fan_cond);
+        sem_post(&neutral_cond_semaphore);
+        sem_post(&home_cond_semaphore);
     }
 
-    printf(COLOR_YELLOW "%s is leaving for dinner\n" COLOR_RESET, person->name);
+    printf(COLOR_CYAN TEXT_UNDERLINE "%s is waiting for their friends at the exit\n" COLOR_RESET, person->name);
+    pthread_mutex_lock(&remaining_people_grps_lock[person->group_id]);
+    remaining_people_in_groups[person->group_id]--;
+    if (remaining_people_in_groups[person->group_id] == 0)
+        printf(COLOR_YELLOW "Group %d is leaving for dinner\n" COLOR_RESET, person->group_id);
+    pthread_mutex_unlock(&remaining_people_grps_lock[person->group_id]);
+    // printf(COLOR_YELLOW"%s is leaving for dinner\n"COLOR_RESET, person->name);
     return NULL;
 }
 
@@ -295,9 +328,9 @@ void *goal_thread_function(void *arg)
     char team_name;
     int *curr_team_goals;
     if (goal->team == 0)
-        curr_team_cond = &home_cond, curr_team_lock = &home_lock, curr_team_goals = &home_goals, team_name = 'H';
+        curr_team_cond = &home_cond, curr_team_lock = &home_lock, curr_team_goals = &h_goals_cnt_g, team_name = 'H';
     else
-        curr_team_cond = &away_cond, curr_team_lock = &away_lock, curr_team_goals = &away_goals, team_name = 'A';
+        curr_team_cond = &away_cond, curr_team_lock = &away_lock, curr_team_goals = &a_goals_cnt_g, team_name = 'A';
 
     double prob = goal->probability;
     double random_prob = (double)rand() / (double)RAND_MAX;
@@ -327,8 +360,8 @@ int main()
     zone_a_remaining = zone_a_capacity;
     zone_n_remaining = zone_n_capacity;
 
-    home_goals = 0;
-    away_goals = 0;
+    h_goals_cnt_g = 0;
+    h_goals_cnt_g = 0;
 
     pthread_mutex_init(&home_lock, NULL);
     pthread_mutex_init(&away_lock, NULL);
@@ -337,20 +370,19 @@ int main()
     pthread_mutex_init(&zone_n_mutex, NULL);
     pthread_cond_init(&home_cond, NULL);
     pthread_cond_init(&away_cond, NULL);
-    pthread_mutex_init(&home_cond_dummy_lock, NULL);
-    pthread_mutex_init(&away_cond_dummy_lock, NULL);
-    pthread_mutex_init(&neutral_cond_dummy_lock, NULL);
-    pthread_cond_init(&away_fan_cond, NULL);
-    pthread_cond_init(&home_fan_cond, NULL);
-    pthread_cond_init(&neutral_fan_cond, NULL);
+    sem_init(&away_cond_semaphore, 0, 0);
+    sem_init(&home_cond_semaphore, 0, 0);
+    sem_init(&neutral_cond_semaphore, 0, 0);
 
     scanf("%d", &spectating_time_x);
-    scanf("%d", &num_groups);
+    scanf("%d", &num_grps_g);
 
     int y = 0;
-    for (int x = 0; x < num_groups; x++)
+    for (int x = 0; x < num_grps_g; x++)
     {
         scanf("%d", &num_people_in_groups[x]);
+        remaining_people_in_groups[x] = num_people_in_groups[x];
+        pthread_mutex_init(&remaining_people_grps_lock[x], NULL);
         for (int z = 0; z < num_people_in_groups[x]; z++)
         {
             persons[y] = calloc(1, sizeof(struct Person));
@@ -368,7 +400,7 @@ int main()
             persons[y]->group_id = x;
             y++;
             persons[x]->finished_watching = false;
-            spectator_count++;
+            num_persons_g++;
         }
     }
     scanf("%d", &num_goal_chances);
@@ -383,18 +415,11 @@ int main()
             goals[x]->team = 1;
     }
 
-    // for(int x=0;x<num_goal_chances;x++)
-    // {
-    //     printf("=================\n");
-    //     printf("%d %d %lf\n", goals[x]->team, goals[x]->goal_time, goals[x]->probability);
-    //     printf("=========================\n");
-    // }
-
     sem_init(&home_semaphore, 0, zone_h_capacity);
     sem_init(&away_semaphore, 0, zone_a_capacity);
     sem_init(&neutral_semaphore, 0, zone_n_capacity);
 
-    for (int x = 0; x < spectator_count; x++)
+    for (int x = 0; x < num_persons_g; x++)
     {
         pthread_create(&person_th[x], NULL, person_thread_function, persons[x]);
     }
@@ -404,11 +429,11 @@ int main()
         pthread_create(&goal_th[x], NULL, goal_thread_function, goals[x]);
     }
 
-    for (int x = 0; x < spectator_count; x++)
+    for (int x = 0; x < num_persons_g; x++)
     {
         pthread_join(person_th[x], NULL);
     }
 
-    printf("SIMULATION OVER");
+    printf("SIMULATION OVER\n");
     exit(0);
 }
