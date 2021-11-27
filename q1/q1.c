@@ -271,11 +271,16 @@ void *handle_course(void *args)
 
                 // unlock lab
                 pthread_mutex_unlock(&labs_mutex[lab_idx]);
+                lab_counter++;
             }
         }
 
         if (lab_counter == num_labs)
-            break;
+        {
+            remove_course(c_id);
+            // break;
+            return NULL;
+        }
 
         //  signal the student about course
         pthread_mutex_lock(&courses_mutex[c_id]);
