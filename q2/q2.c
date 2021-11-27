@@ -291,7 +291,7 @@ void exit_person(int p_id)
     pthread_mutex_lock(&rem_ppl_grps_mutex[grp_id]);
     if (--rem_ppl_grps[grp_id] == 0)
     {
-        printf(BBLU "Group %d is leaving for dinner\n" ANSI_RESET, grp_id);
+        printf(BBLU "Group %d is leaving for dinner\n" ANSI_RESET, grp_id + 1);
     }
     pthread_mutex_unlock(&rem_ppl_grps_mutex[grp_id]);
 
@@ -342,7 +342,7 @@ void *handle_goal(void *args)
 
 int main()
 {
-    // srand(time(NULL));
+    srand(time(NULL));
 
     scanf("%d %d %d", &zone_h_lim_g, &zone_a_lim_g, &zone_n_lim_g);
     scanf("%d", &spec_time_x);
