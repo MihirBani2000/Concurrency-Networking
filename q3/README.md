@@ -1,5 +1,5 @@
 # OSN Assignment 5 - Question 3
-
+### ~ Mihir Bani, 2019113003
 ## How to Run
 1. `client.cpp` and `server.cpp` are in `client` and `server` directories respectively.
 2. **For Server Code**- Open a terminal in `server` directory, compile the code using ```g++ server.c -o server -lpthread``` and run the code by typing ```./server n``` on terminal.

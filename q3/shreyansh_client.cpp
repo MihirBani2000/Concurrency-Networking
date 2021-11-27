@@ -1,20 +1,26 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
+#include <pthread.h>
+
+/////////////////////////////
 #include <pthread.h>
 #include <iostream>
 #include <semaphore.h>
+#include <assert.h>
 #include <queue>
+#include <vector>
 #include <tuple>
-
 using namespace std;
-typedef long long LL;
+/////////////////////////////
 
 //Regular bold text
 #define BBLK "\e[1;30m"
@@ -25,24 +31,33 @@ typedef long long LL;
 #define BMAG "\e[1;35m"
 #define BCYN "\e[1;36m"
 #define ANSI_RESET "\x1b[0m"
+
+typedef long long LL;
+const LL MOD = 1000000007;
 #define part cout << "-----------------------------------" << endl;
 #define pb push_back
 #define debug(x) cout << #x << " : " << x << endl
 
-#define SERVER_PORT 8001
-const LL BUFFER_SIZE = 1048576;
-pthread_mutex_t cout_mutex = PTHREAD_MUTEX_INITIALIZER;
+///////////////////////////////
+#define SERVER_PORT 8002
+////////////////////////////////////
 
-struct send_obj
-{
-    int id;
-    int slp_time;
-    string msg;
-};
+const LL buff_sz = 1048576;
+
+vector < pair <int,string> > vec;
+pthread_mutex_t print_lock = PTHREAD_MUTEX_INITIALIZER;
+///////////////////////////////////////////////////
+
+string str_err_1 = "Insertion Sucessful!";
+string str_err_2 = "Key already exists!";
+string str_err_3 = "No such key exists!";
+string str_err_4 = "Deletion Sucessful!";
+string str_err_5 = "Concat failed as at least one of the keys does not exist!";
+
 
 pair<string, int> read_string_from_socket(int fd, int bytes)
 {
-    string output;
+    std::string output;
     output.resize(bytes);
 
     int bytes_received = read(fd, &output[0], bytes - 1);
@@ -70,6 +85,7 @@ int send_string_on_socket(int fd, const string &s)
     if (bytes_sent < 0)
     {
         cerr << "Failed to SEND DATA on socket.\n";
+        // return "
         exit(-1);
     }
 
@@ -80,27 +96,16 @@ int get_socket_fd(struct sockaddr_in *ptr)
 {
     struct sockaddr_in server_obj = *ptr;
 
-    // socket() creates an endpoint for communication and returns a file
-    //        descriptor that refers to that endpoint.  The file descriptor
-    //        returned by a successful call will be the lowest-numbered file
-    //        descriptor not currently open for the process.
     int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_fd < 0)
     {
         perror("Error in socket creation for CLIENT");
         exit(-1);
     }
-
     int port_num = SERVER_PORT;
     memset(&server_obj, 0, sizeof(server_obj)); // Zero out structure
     server_obj.sin_family = AF_INET;
     server_obj.sin_port = htons(port_num); //convert to big-endian order
-
-    // Converts an IP address in numbers-and-dots notation into either a
-    // struct in_addr or a struct in6_addr depending on whether you specify AF_INET or AF_INET6.
-    //https://stackoverflow.com/a/20778887/6427607
-
-    /* connect to server */
     if (connect(socket_fd, (struct sockaddr *)&server_obj, sizeof(server_obj)) < 0)
     {
         perror("Problem in connecting to the server");
@@ -109,48 +114,57 @@ int get_socket_fd(struct sockaddr_in *ptr)
     return socket_fd;
 }
 
-void *begin_process(void *args)
+void * begin_process(void * ptr)
 {
-    struct send_obj *to_send = (struct send_obj *)args;
-    string output_msg;
+    long long int indx = (long long int)ptr;
+    sleep(vec[indx].first);
     struct sockaddr_in server_obj;
-
-    // sleeping for required time
-    sleep(to_send->slp_time);
-
     int socket_fd = get_socket_fd(&server_obj);
-    // pthread_mutex_lock(&cout_mutex);
-    // cout << "Connection to server successful " << to_send->id << endl;
-    // pthread_mutex_unlock(&cout_mutex);
-
-    send_string_on_socket(socket_fd, to_send->msg);
+    // cout<<"indx = "<<indx<<'\n';
+    // cout << "Connection to server successful" << endl;
+    string to_send;
+    // cout << "Enter msg: "<<vec[indx].second;
+    // temp = vec[indx].second;
+    string temp = vec[indx].second;
+    // cout<<"Temp = "<<temp<<'\n';
+    send_string_on_socket(socket_fd, temp);
     int num_bytes_read;
-    tie(output_msg, num_bytes_read) = read_string_from_socket(socket_fd, BUFFER_SIZE);
-    pthread_mutex_lock(&cout_mutex);
-    cout << to_send->id << ":" << output_msg << endl;
-    pthread_mutex_unlock(&cout_mutex);
+    string output_msg;
+    tie(output_msg, num_bytes_read) = read_string_from_socket(socket_fd, buff_sz);
+
+    cout<<indx<<":"<< output_msg << '\n';
+    fflush(stdout);
+    cout << "====" << endl;
     return NULL;
 }
 
 int main(int argc, char *argv[])
 {
-    int num_clients;
-    cin >> num_clients;
-    struct send_obj to_send[num_clients];
-    pthread_t t_clients[num_clients];
 
-    for (int i = 0; i < num_clients; i++)
+    int i, j, k, t, n,m;
+    pthread_t client_thread[1000];
+    char str[500];
+    string val2;
+    int val1;
+    cin>>m;
+    for(int i=0;i<m;i++)
     {
-        to_send[i].id = i;
-        cin >> to_send[i].slp_time;
-        getline(cin, to_send[i].msg);
+        cin>>val1;
+        cin.getline(str,100);
+        vec.pb({val1,str});
+
+
     }
-
-    for (int i = 0; i < num_clients; i++)
-        pthread_create(&t_clients[i], NULL, begin_process, (void *)(&to_send[i]));
-
-    for (int i = 0; i < num_clients; i++)
-        pthread_join(t_clients[i], NULL);
-
+    // cout<<"reach here\n";
+    for(int i=0;i<m;i++)
+    {
+        // cout<<"Inside]n";
+        pthread_create(&client_thread[i],NULL,begin_process,(void *)(long long int)i);
+    }
+    for(int i=0;i<m;i++)
+    {
+        pthread_join(client_thread[i],NULL);
+    }
+    // begin_process();
     return 0;
 }

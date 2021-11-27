@@ -278,7 +278,6 @@ exit_from_here:
 
 void *handle_thread_pool(void *args)
 {
-    // cout << "Thread " << pthread_self() << "created." << endl;
     printf("Thread %ld created.\n", pthread_self());
     while (1)
     {
@@ -287,12 +286,11 @@ void *handle_thread_pool(void *args)
         {
             // cout << "size" << my_q.size() << "\t" << pthread_self() << endl;
             pthread_cond_wait(&q_condvar, &q_mutex);
-            // part;
         }
         int client_fd = my_q.front();
         // cout << "before size" << my_q.size() << endl;
         my_q.pop();
-        cout << pthread_self() << " popped " << client_fd << endl;
+        cout << pthread_self() << " popped fd " << client_fd << endl;
         part;
         // cout << "after size" << my_q.size() << endl;
         pthread_mutex_unlock(&q_mutex);

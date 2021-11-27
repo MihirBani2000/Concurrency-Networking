@@ -383,8 +383,6 @@ int main()
         {
             printf("\nmutex error: unable to initialize mutex lock");
             printf("\nSimulation Ending.\n");
-            // destroy_all_mutex();
-            // return 0;
             exit(EXIT_FAILURE);
         }
     }
@@ -408,8 +406,6 @@ int main()
         {
             printf("\nmutex error: unable to initialize mutex lock");
             printf("\nSimulation Ending.\n");
-            // destroy_all_mutex();
-            // return 0;
             exit(EXIT_FAILURE);
         }
     }
@@ -494,8 +490,6 @@ int main()
     // join threads
     for (int i = 0; i < num_students_g; i++)
         pthread_join(t_students[i], NULL);
-    // for (int i = 0; i < num_courses; i++)
-    //     pthread_join(t_courses[i], NULL);
 
     printf("\nSimulation Finished Successfully.\n");
     destroy_all_mutex();
